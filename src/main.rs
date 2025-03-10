@@ -1,7 +1,7 @@
 use rppal::gpio::Gpio;
 use std::thread;
 use log::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CHUTE_DEPLOY_ALT: f32 = (1000.0 / 3.28);
 const BALLOON_RELEASE_ALT: f32 = (1500.0 / 3.28);
@@ -16,21 +16,38 @@ fn main() {
     Five: Has chute deployed?
     */
     let mut state: (u8, bool, bool, bool, bool) = (0, false, false, false, false);
+    let mut barometer_check: u8 = 0;
+    let mut altitudes_times: (f32, f32, Instant, Instant) = (0.0, 0.0, Instant::now(), Instant::now());
     while true{
         match state{
             (1, true, true, true, false) => deploy_chute(state),
             (2, true, true, false, false) => release_balloon(state),
             (3, true, false, false, false) => pop_balloon(state),
             (4, false, false, false, false) => launch_rocket(state),
-            _ => check(state)
+            _ => check(state, barometer_check, &mut altitudes_times)
         };
     }
 }
 
-fn check(state: (u8, bool, bool, bool, bool)) -> (u8, bool, bool, bool, bool){
-    let altitude: f32 = checkAltitude();
+fn check(state: (u8, bool, bool, bool, bool), mut barometer_check: u8, altitudes: &mut (f32, f32, Instant, Instant)) -> (u8, bool, bool, bool, bool){
+
+    let mut altitude = altitudes.1;
+    if (barometer_check >= 255){
+        barometer_check = 0;
+    } else {
+        barometer_check += 1;
+    }
+    if (barometer_check == 0) { 
+        altitudes.2 = altitudes.3;
+        altitudes.3 = Instant::now();
+
+        altitudes.0 = altitudes.1;
+        altitude = checkAltitude();
+        altitudes.1 = altitude;
+        info!("Current read altitude: {altitude} metres.");
+    }
+
     let flags: (bool, bool, bool, bool) = checkFlags();
-    info!("Current read altitude: {altitude} metres.");
 
     if (altitude >= ROCKET_ALT && state.0 == 0 || flags.0) {
         return (4, state.1, state.2, state.3, state.4);
@@ -106,3 +123,8 @@ fn launch_rocket(state: (u8, bool, bool, bool, bool)) -> (u8, bool, bool, bool, 
 
 fn checkAltitude() -> f32 { return 0.0; }
 fn checkFlags() -> (bool, bool, bool, bool) { return (false, false, false, false) }
+
+fn getAltitudeDelta(altitudes: (f32, f32, Instant, Instant)) -> f32{
+    let time = (altitudes.3.duration_since(altitudes.2).as_millis() as f64) / 1000000.0;
+    return (altitudes.1 - altitudes.0) / (time as f32);
+}
